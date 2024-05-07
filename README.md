@@ -1,0 +1,1 @@
+# ansible-rhel-patch-management
