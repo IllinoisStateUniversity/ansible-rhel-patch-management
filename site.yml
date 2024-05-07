@@ -1,0 +1,96 @@
+---
+- name: RHEL - Patch Management
+  hosts: "{{ survey_hostname | default(survey_hosts) }}"
+  gather_facts: true
+
+  tasks:
+    - name: Set Variable for Enabled Repos for RHEL 7
+      ansible.builtin.set_fact:
+        enablerepo:
+          - rhel-7-server-rpms
+          - ISU_Microsoft_Microsoft_RHEL_7_Prod
+        enablerepo_epel:
+          - ISU_EPEL_EPEL_7
+          - rhel-7-server-rpms
+      when: ansible_distribution_major_version == "7"
+
+    - name: Set Variable for Enabled Repos for RHEL 8
+      ansible.builtin.set_fact:
+        enablerepo:
+          - rhel-8-for-x86_64-baseos-rpms
+          - rhel-8-for-x86_64-appstream-rpms
+          - ISU_Microsoft_Microsoft_RHEL_8_Prod
+        enablerepo_epel:
+          - ISU_EPEL_EPEL_8
+          - rhel-8-for-x86_64-baseos-rpms
+          - rhel-8-for-x86_64-appstream-rpms
+      when: ansible_distribution_major_version == "8"
+
+    - name: Set Variable for Enabled Repos for RHEL 9
+      ansible.builtin.set_fact:
+        enablerepo:
+          - rhel-9-for-x86_64-baseos-rpms
+          - rhel-9-for-x86_64-appstream-rpms
+          - ISU_Microsoft_Microsoft_RHEL_9_Prod
+        enablerepo_epel:
+          - ISU_EPEL_EPEL_9
+          - rhel-9-for-x86_64-baseos-rpms
+          - rhel-9-for-x86_64-appstream-rpms
+      when: ansible_distribution_major_version == "9"
+
+    - name: Install / Update Prereqs
+      ansible.builtin.yum:
+        name:
+          - yum-utils
+        state: latest
+        enablerepo: "{{ enablerepo }}"
+        disablerepo: '*'
+
+    - name: Exclude Any Packages if Defined
+      ansible.builtin.lineinfile:
+        path: /etc/yum.conf
+        line: 'exclude={{ item }}'
+        state: present
+      with_items: "{{ exclude_packages }}"
+      when: exclude_packages is defined
+
+    - name: Install Updates
+      ansible.builtin.yum:
+        name: '*'
+        state: latest
+        enablerepo: "{{ enablerepo }}"
+        disablerepo: '*'
+        update_cache: true
+
+    - name: Install Updates for EPEL that the Infrastructure Team Installs
+      ansible.builtin.yum:
+        name:
+          - htop
+        state: latest
+        enablerepo: "{{ enablerepo_epel }}"
+        disablerepo: '*'
+
+    - name: Cleanup Unused Dependencies
+      ansible.builtin.yum:
+        state: absent
+        autoremove: true
+
+    - name: Re-include any Packages if Excluded Earlier
+      ansible.builtin.lineinfile:
+        path: /etc/yum.conf
+        line: 'exclude={{ item }}'
+        state: absent
+      with_items: "{{ exclude_packages }}"
+      when: exclude_packages is defined
+
+    - name: Check if Server needs a Restart
+      ansible.builtin.command:
+        cmd: needs-restarting -r
+      register: needs_reboot
+      failed_when: needs_reboot.rc > 1
+      changed_when: needs_reboot.rc == 1
+
+    - name: Reboot Server if Needed
+      ansible.builtin.reboot:
+        post_reboot_delay: 10
+      when: needs_reboot.rc == 1
